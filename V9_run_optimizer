@@ -1,0 +1,674 @@
+from V9_optimizer import optimizer
+from visualizer import analyze_step1_results, calculate_real_cycles, combine_charge_discharge, export_full_results_to_excel_premium, auswertung_transaktionen_stuendlich
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+from datetime import datetime
+
+
+# Batterieparameter definieren
+n_days = 1
+steps = 1
+n_hours = int(24*n_days)
+n_cycles = 4
+c_rate = 1
+energy_cap = 10000  # kWh
+power_cap = energy_cap*c_rate   # kW
+min_soc = 0
+max_soc = 10000
+eta_cha = 1
+eta_dis = 1
+
+
+print("n_days =", n_days, "# Anzahl der Tage (z.B. 1 Jahr = 365 Tage)")
+print("n_hours =", n_hours, "# Anzahl der Stunden (365 Tage * 24 Stunden)")
+print("n_cycles =", n_cycles, "# Anzahl der Lade-/Entladezyklen pro Tag")
+print("c_rate =", c_rate, "# C-Rate (wie schnell der Speicher geladen/entladen werden kann)")
+print("energy_cap =", energy_cap, "kWh # Energie-Kapazität des Speichers in kWh")
+print("power_cap =", power_cap, "kW # Leistungsgrenze des Speichers (kW)")
+print("min_soc =", min_soc, "kWh # Minimum State of Charge (Mindestladestand)")
+print("max_soc =", max_soc, "kWh # Maximum State of Charge (Maximaler Ladestand)")
+print("eta_cha =", eta_cha, "# Wirkungsgrad beim Laden")
+print("eta_dis =", eta_dis, "# Wirkungsgrad beim Entladen")
+
+
+
+
+# Pfad zu Solver und Excel-Datei 
+#glpk_path = r"C:\Users\r.rohsius\Downloads\winglpk-4.65\glpk-4.65\w64\glpsol.exe"
+
+#Stündlich:
+#excel_path_daa = r"C:\Users\r.rohsius\OneDrive - Green Planet Energy eG\Desktop\BA\Python\1.Schritt\energy-charts_Stromproduktion_und_Börsenstrompreise_in_Deutschland_2025 (1).xlsx"
+excel_path_daa = r"C:\Users\r.rohsius\OneDrive - Green Planet Energy eG\Desktop\BA\Python\1.Schritt\energy-charts_Stromproduktion_und_Börsenstrompreise_in_Deutschland_2022 (1).xlsx"
+
+
+#Viertelsündlich
+#excel_path_ida = r"C:\Users\r.rohsius\OneDrive - Green Planet Energy eG\Desktop\BA\Python\1.Schritt\energy-charts_Stromproduktion_und_Börsenstrompreise_in_Deutschland_2024.xlsx"
+excel_path_ida = r"C:\Users\r.rohsius\OneDrive - Green Planet Energy eG\Desktop\BA\Python\1.Schritt\energy-charts_Stromproduktion_und_Börsenstrompreise_in_Deutschland_2022.xlsx"
+#excel_path_ida = r"C:\Users\r.rohsius\OneDrive - Green Planet Energy eG\Desktop\BA\Python\1.Schritt\energy-charts_Stromproduktion_und_Börsenstrompreise_in_Deutschland_2023.xlsx"
+
+
+
+# 2️⃣ Excel laden
+xls = pd.ExcelFile(excel_path_daa)
+df = xls.parse("1")
+price_column = df.iloc[24:, 1]
+
+# 3️⃣ Preise extrahieren
+price_list_daa = []
+for i, val in enumerate(price_column):
+    try:
+        price = float(str(val).replace(",", "."))
+        price_list_daa.append(price/1000)
+    except ValueError:
+        continue
+
+# 2️⃣ Excel laden
+xls_q = pd.ExcelFile(excel_path_ida)
+df_q = xls_q.parse("1")
+price_column = df_q.iloc[24:, 1]
+
+# 3️⃣ Preise extrahieren
+price_list_ida = []
+for i, val in enumerate(price_column):
+    try:
+        price = float(str(val).replace(",", "."))
+        price_list_ida.append(price/1000)
+    except ValueError:
+        continue
+
+
+
+
+
+
+
+# 4️⃣ Optimierer-Instanz erstellen
+opt = optimizer(n_days=n_days,
+    n_cycles=n_cycles,
+    c_rate=c_rate,
+    energy_cap=energy_cap,
+    eta_cha=eta_cha,
+    eta_dis=eta_dis,
+    min_soc=min_soc,
+    max_soc=max_soc,
+    excel_path_daa = excel_path_daa,
+    excel_path_ida= excel_path_ida
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 6️⃣ Step 1: DAA-Optimierung
+soc_daa_h, soc_q, cha_daa_quarters, dis_daa_quarters, profit_daa, cha_daa_h, dis_daa_h, cha_daa_q_real, dis_daa_q_real = opt.step1_optimize_daa()
+
+
+
+
+
+
+
+
+
+
+
+
+#print(cha_daa_q_real, dis_daa_q_real)
+#print(dis_daa_quarters)
+print(cha_daa_quarters)
+print(dis_daa_quarters)
+
+print(f"\n✅ Step 1 abgeschlossen: Profit DAA = {profit_daa:.2f} €")
+
+# 7️⃣ Analyse Step1 Ergebnisse (SoC, Preis, Lade-/Entladeleistung)
+analyze_step1_results(
+    soc_daa_hours=soc_daa_h,
+    cha_daa_quarters=cha_daa_quarters,
+    dis_daa_quarters=dis_daa_quarters,
+    price_list_hourly=price_list_daa,
+    power_cap=power_cap,
+    n_hours=n_hours
+)
+auswertung_transaktionen_stuendlich(cha_daa_h, dis_daa_h,price_list_daa, power_cap, eta_dis)
+
+print(price_list_daa[:25])
+print(cha_daa_quarters)
+print(dis_daa_quarters)
+print(soc_q)
+
+
+
+calculate_real_cycles(
+    cha_quarters=cha_daa_quarters,
+    dis_quarters=dis_daa_quarters,
+    power_cap=power_cap,
+    n_hours=n_hours,
+    min_soc=min_soc,
+    max_soc=max_soc,
+    allowed_cycles=n_cycles,
+    eta_cha = eta_cha,
+    eta_dis = eta_dis,
+    cha_daa_quarters = cha_daa_quarters
+    )
+
+
+def print_step1_table(
+    soc_ida_quarters: list,
+    cha_ida_quarters: list,
+    dis_ida_quarters: list,
+    price_list_ida: list,
+    power_cap: float
+):
+    """
+    📋 Druckt eine Tabelle der Step2-Ergebnisse:
+    - Viertelstunde
+    - Preis [€/kWh]
+    - SoC [kWh]
+    - Ladeleistung [kW]
+    - Entladeleistung [kW]
+    """
+    df = pd.DataFrame({
+        'Viertelstunde': list(range(1, len(soc_ida_quarters) + 1)),
+        'Preis [€/kWh]': price_list_ida,
+        'SoC [kWh]': soc_ida_quarters,
+        'Ladeleistung [kW]': [c * power_cap for c in cha_ida_quarters],
+        'Entladeleistung [kW]': [d * power_cap for d in dis_ida_quarters],
+    })
+    # Zeige die Tabelle in der Konsole oder Notebook an
+    print(df.to_string(index=False))
+    print("✅ Analyse Step2-Tabelle gedruckt!")
+
+# 3) Tabelle ausgeben 🚀
+print_step1_table(
+    soc_ida_quarters=soc_q,
+    cha_ida_quarters=cha_daa_quarters,
+    dis_ida_quarters=dis_daa_quarters,
+    price_list_ida=np.repeat(price_list_daa[:24],4),
+    power_cap=power_cap/4
+)
+
+
+"""energy_profile = combine_charge_discharge(
+    cha_quarters=cha_daa_quarters,
+    dis_quarters=dis_daa_quarters,
+    power_cap=power_cap
+)"""
+#print(f"✅ abgeschlossen: Profit DAA = {profit_daa:.2f} €")
+
+
+"""
+export_full_results_to_excel_premium(
+    soc_hours=soc_daa_h,
+    cha_quarters=cha_daa_quarters,
+    dis_quarters=dis_daa_quarters,
+    energy_profile=energy_profile,
+    profit=profit_daa,
+    n_days=n_days,
+    power_cap=power_cap,
+    energy_cap=energy_cap,
+    min_soc=min_soc,
+    max_soc=max_soc,
+    eta_cha=eta_cha,
+    eta_dis=eta_dis,
+    n_cycles=n_cycles,
+    cha_daa_h = cha_daa_h,
+    dis_daa_h = dis_daa_h,
+    price_list_daa=price_list_daa,
+    c_rate=c_rate,
+    price_list_ida=price_list_ida,
+    folder_path="ergebnisse"
+    )
+    
+"""
+
+
+
+
+
+
+
+
+
+
+
+
+
+#🔁 Step 2: IDA-Optimierung (Intraday Auction)
+
+(
+    step2_soc_ida,
+    cha_ida,
+    dis_ida,
+    step2_cha_ida_close,
+    step2_dis_ida_close,
+    profit_ida,
+    combined_cha,
+    combined_dis
+) = opt.step2_optimize_ida(
+    n_hours,         # übergibt 4*n_hours Slots intern
+    energy_cap,
+    power_cap,
+    eta_cha,
+    eta_dis,
+    cha_daa_quarters,   # aus Schritt 1, Länge 96
+    dis_daa_quarters    # aus Schritt 1, Länge 96
+)
+
+
+
+
+
+
+
+
+print(f"\n✅ Step 2 abgeschlossen: Profit IDA = {profit_ida:.2f} €")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+viertelstunden = list(range(1, 97))
+step2_cha_ida = cha_ida
+step2_dis_ida = dis_ida
+
+# Preislinien-Vorbereitung erneut (Werte in €/MWh = *1000)
+da_prices_quarter = []
+for price in price_list_daa[:24]:
+    da_prices_quarter.extend([price * 1000] * 4)
+
+price_list_ida_scaled = [p * 1000 for p in price_list_ida[:96]]
+
+# Trades multipliziert für bessere Lesbarkeit
+da_cha_marks = [cha * 10 if cha > 0 else None for cha in cha_daa_quarters[:96]]
+da_dis_marks = [-dis * 10 if dis > 0 else None for dis in dis_daa_quarters[:96]]
+id_cha_marks = [cha * 10 if cha > 0 else None for cha in step2_cha_ida]
+id_dis_marks = [-dis * 10 if dis > 0 else None for dis in step2_dis_ida]
+id_cha_close_marks = [cha * 10 if cha > 0 else None for cha in step2_cha_ida_close]
+id_dis_close_marks = [-dis * 10 if dis > 0 else None for dis in step2_dis_ida_close]
+
+# Plot
+plt.figure(figsize=(14, 6))
+viertelstunden = list(range(1, 97))
+# Preislinien
+plt.bar(viertelstunden, da_prices_quarter, label="🕐 DA-Preise (€/MWh)", linestyle='--', color="orange")
+plt.plot(viertelstunden, price_list_ida_scaled, label="⏱️ IDA-Preise (€/MWh)", linewidth=2, color="dodgerblue")
+
+# Markierungen für Lade-/Entladevorgänge
+plt.scatter(viertelstunden, da_cha_marks, label="⚡ DA-Ladung", marker="^", color="green")
+plt.scatter(viertelstunden, da_dis_marks, label="⚡ DA-Entladung", marker="v", color="red")
+plt.scatter(viertelstunden, id_cha_marks, label="⚡ IDA-Ladung", marker="^", color="blue")
+plt.scatter(viertelstunden, id_dis_marks, label="⚡ IDA-Entladung", marker="v", color="navy")
+# IDA-Closing-Trades
+plt.scatter(viertelstunden, id_cha_close_marks, label="🔄 IDA-Closing-Kauf",    marker=".", color="purple")
+plt.scatter(viertelstunden, id_dis_close_marks, label="🔄 IDA-Closing-Verkauf", marker=".", color="magenta")
+
+
+# SoC vom ID-Markt als eigene Kurve (rechte y-Achse)
+ax1 = plt.gca()
+ax2 = ax1.twinx()
+ax2.plot(viertelstunden, step2_soc_ida, label="🔋 SoC IDA", color="orange", linestyle="-", linewidth=2)
+ax2.set_ylabel("State of Charge (kWh)", color="black")
+
+# Diagrammgestaltung
+ax1.set_title("📈 Strompreise DA vs. IDA + Lade-/Entlade-Trades + SoC (IDA)")
+ax1.set_xlabel("Viertelstunde")
+ax1.set_ylabel("Preis (€/MWh) / Trades (x10)")
+ax1.grid(True)
+
+# Legenden korrekt zusammenführen
+h1, l1 = ax1.get_legend_handles_labels()
+h2, l2 = ax2.get_legend_handles_labels()
+plt.legend(h1 + h2, l1 + l2, loc='upper left')
+
+plt.tight_layout()
+plt.show()
+
+def print_step2_table(
+    soc_ida_quarters: list,
+    cha_ida_quarters: list,
+    dis_ida_quarters: list,
+    cha_ida_close: list,
+    dis_ida_close: list,
+    cha_daa_quarters: list,
+    dis_daa_quarters: list,
+    combined_cha: list,
+    combined_dis: list,
+    price_list_ida: list,
+    power_cap: float,
+    pricelistdaa: list
+):
+    """
+    📋 Druckt eine Tabelle der Step2-Ergebnisse je Viertelstunde:
+      - Preis IDA / DAA [€/kWh]
+      - SoC [kWh]
+      - DAA-Ladung/Entladung [kW]
+      - IDA-Ladung/Entladung [kW]
+      - IDA-Close Kauf/Verkauf [kW]
+      - Kombinierte Ströme (DAA+IDA) [kW]
+      - Ausgaben [€] (Ladekosten)
+      - Einnahmen [€] (Verkaufserlöse)
+
+    Unten wird die Summe jeder Spalte ausgegeben.
+    """
+    # Berechne Ausgaben und Einnahmen pro Viertelstunde
+    ausgaben = []
+    einnahmen = []
+    for q in range(len(soc_ida_quarters)):
+        # Energie in kWh pro Viertelstunde = Leistung [kW] * 0.25h
+        e_cha_daa    = cha_daa_quarters[q]   * power_cap/4
+        e_cha_ida    = cha_ida_quarters[q]   * power_cap/4
+        e_cha_close  = cha_ida_close[q]      * power_cap/4
+
+        e_dis_daa    = dis_daa_quarters[q]   * power_cap/4
+        e_dis_ida    = dis_ida_quarters[q]   * power_cap/4
+        e_dis_close  = dis_ida_close[q]      * power_cap/4
+
+        price_daa    = pricelistdaa[q]
+        price_ida    = price_list_ida[q]
+
+        # Kosten: alle Ladevorgänge zu ihren jeweiligen Preisen
+        kosten = e_cha_daa * price_daa \
+               + e_cha_ida * price_ida \
+               + e_cha_close * price_ida
+        # Erlöse: alle Entladevorgänge zu ihren jeweiligen Preisen
+        erloes = e_dis_daa * price_daa \
+               + e_dis_ida * price_ida \
+               + e_dis_close * price_ida
+
+        ausgaben.append(kosten)
+        einnahmen.append(erloes)
+
+    # DataFrame aufbauen
+    df = pd.DataFrame({
+        'Viertelstunde':           list(range(1, len(soc_ida_quarters) + 1)),
+        'Preis IDA [€/kWh]':       price_list_ida,
+        'Preis DAA [€/kWh]':       pricelistdaa,
+        'SoC [kWh]':               soc_ida_quarters,
+        'DAA Ladung [kW]':         [c * power_cap for c in cha_daa_quarters],
+        'DAA Entladung [kW]':      [d * power_cap for d in dis_daa_quarters],
+        'IDA Ladung [kW]':         [c * power_cap for c in cha_ida_quarters],
+        'IDA Entladung [kW]':      [d * power_cap for d in dis_ida_quarters],
+        'IDA-Close Kauf [kW]':     [c * power_cap for c in cha_ida_close],
+        'IDA-Close Verkauf [kW]':  [d * power_cap for d in dis_ida_close],
+        'Kombi Ladung [kW]':       [c * power_cap for c in combined_cha],
+        'Kombi Entladung [kW]':    [d * power_cap for d in combined_dis],
+        'Ausgaben [€]':            ausgaben,
+        'Einnahmen [€]':           einnahmen,
+    })
+
+    # Tabelle ausgeben
+    print(df.to_string(index=False))
+
+    # Summen berechnen und ausgeben
+    sums = df.sum(numeric_only=True)
+    print("\n📊 Spaltensummen:")
+    print(f"→ Gesamt DAA-Ladung:        {sums['DAA Ladung [kW]']:.1f} kW")
+    print(f"→ Gesamt DAA-Entladung:     {sums['DAA Entladung [kW]']:.1f} kW")
+    print(f"→ Gesamt IDA-Ladung:        {sums['IDA Ladung [kW]']:.1f} kW")
+    print(f"→ Gesamt IDA-Entladung:     {sums['IDA Entladung [kW]']:.1f} kW")
+    print(f"→ Gesamt IDA-Close-Käufe:   {sums['IDA-Close Kauf [kW]']:.1f} kW")
+    print(f"→ Gesamt IDA-Close-Verkauf: {sums['IDA-Close Verkauf [kW]']:.1f} kW")
+    print(f"→ Gesamt Kombi-Ladung:      {sums['Kombi Ladung [kW]']:.1f} kW")
+    print(f"→ Gesamt Kombi-Entladung:   {sums['Kombi Entladung [kW]']:.1f} kW")
+    print(f"→ Gesamt Ausgaben:          {sums['Ausgaben [€]']:.2f} €")
+    print(f"→ Gesamt Einnahmen:         {sums['Einnahmen [€]']:.2f} €")
+
+    print("\n✅ Analyse Step2-Tabelle mit Closings, Summen und Profit gedruckt! 👍")
+
+
+
+print_step2_table(
+    soc_ida_quarters=step2_soc_ida,
+    cha_ida_quarters=step2_cha_ida,
+    dis_ida_quarters=step2_dis_ida,
+    cha_ida_close=step2_cha_ida_close,
+    dis_ida_close=step2_dis_ida_close,
+    cha_daa_quarters=cha_daa_quarters,
+    dis_daa_quarters=dis_daa_quarters,
+    combined_cha=combined_cha,
+    combined_dis=combined_dis,
+    price_list_ida=price_list_ida[:96],
+    power_cap=power_cap/4   , # Leistung pro Viertelstunde
+    pricelistdaa=np.repeat(price_list_daa[:24],4)
+)
+
+
+
+
+
+
+"""
+import os
+import pandas as pd
+import numpy as np
+from datetime import datetime
+
+def export_all_time_series_to_excel_quarterly(
+    soc_q,
+    cha_daa_quarters,
+    dis_daa_quarters,
+    cha_daa_q_real,
+    dis_daa_q_real,
+    step2_soc_ida,
+    cha_ida,
+    dis_ida,
+    step2_cha_ida_close,
+    step2_dis_ida_close,
+    combined_cha,
+    combined_dis,
+    price_list_daa,
+    price_list_ida,
+    folder_path="."
+):
+
+    os.makedirs(folder_path, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"time_series_quarterly_{ts}.xlsx"
+    filepath = os.path.join(folder_path, filename)
+
+    # Länge der Viertelstunden-Reihen
+    N = len(cha_daa_quarters)
+
+    # Hochskalierte DAA-Preise auf Viertelstunden
+    price_daa_q = np.repeat(price_list_daa, 4)[:N]
+    # IDA-Preise liegen schon im Viertelstunden-Raster
+    price_ida_q = price_list_ida[:N]
+
+    # DataFrame mit allen Serien
+    df = pd.DataFrame({
+        "Viertelstunde":                np.arange(1, N+1),
+        "Preis_DAA_€/kWh":              price_daa_q,
+        "Preis_IDA_€/kWh":              price_ida_q,
+        "SoC_DAA_kWh":                  soc_q,
+        "DAA_Charge_pu":                cha_daa_quarters,
+        "DAA_Discharge_pu":             dis_daa_quarters,
+        "DAA_Charge_Real_kWh":          cha_daa_q_real,
+        "DAA_Discharge_Real_kWh":       dis_daa_q_real,
+        "SoC_IDA_kWh":                  step2_soc_ida,
+        "IDA_Charge_pu":                cha_ida,
+        "IDA_Discharge_pu":             dis_ida,
+        "IDA_Close_Charge_pu":          step2_cha_ida_close,
+        "IDA_Close_Discharge_pu":       step2_dis_ida_close,
+        "Combined_Charge_pu":           combined_cha,
+        "Combined_Discharge_pu":        combined_dis
+    })
+
+    # schreibe alles in ein Sheet namens "QuarterlyData"
+    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="QuarterlyData", index=False)
+
+    print(f"✅ Alle Viertelstunden-Zeitreihen exportiert nach:\n   {filepath}")
+
+
+# … alle Berechnungen für soc_q, cha_daa_quarters, …, price_list_ida liegen bereits vor …
+
+export_all_time_series_to_excel_quarterly(
+    soc_q=               soc_q,
+    cha_daa_quarters=    cha_daa_quarters,
+    dis_daa_quarters=    dis_daa_quarters,
+    cha_daa_q_real=      cha_daa_q_real,
+    dis_daa_q_real=      dis_daa_q_real,
+    step2_soc_ida=       step2_soc_ida,
+    cha_ida=             cha_ida,
+    dis_ida=             dis_ida,
+    step2_cha_ida_close= step2_cha_ida_close,
+    step2_dis_ida_close= step2_dis_ida_close,
+    combined_cha=        combined_cha,
+    combined_dis=        combined_dis,
+    price_list_daa=      price_list_daa,
+    price_list_ida=      price_list_ida,
+    folder_path=         "ergebnisse"   # hier wird die Datei abgelegt
+)
+"""
+
+import os
+import io
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import matplotlib.pyplot as plt
+from openpyxl import load_workbook
+from openpyxl.drawing.image import Image
+
+def export_all_time_series_with_charts(
+    soc_q,
+    cha_daa_quarters,
+    dis_daa_quarters,
+    cha_daa_q_real,
+    dis_daa_q_real,
+    step2_soc_ida,
+    cha_ida,
+    dis_ida,
+    step2_cha_ida_close,
+    step2_dis_ida_close,
+    combined_cha,
+    combined_dis,
+    price_list_daa,
+    price_list_ida,
+    folder_path="."
+):
+    """
+    Exportiert alle Zeitreihen im Viertelstunden-Raster in ein einziges Excel-Sheet
+    und erzeugt zu jeder Serie ein Diagramm auf einer zweiten Sheet.
+    """
+    os.makedirs(folder_path, exist_ok=True)
+    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"time_series_quarterly_{ts}.xlsx"
+    filepath = os.path.join(folder_path, filename)
+
+    # Anzahl Viertelstunden
+    N = len(cha_daa_quarters)
+
+    # DAA‐Preise auf Viertelstunden hochskalieren
+    price_daa_q = np.repeat(price_list_daa, 4)[:N]
+    # IDA‐Preise (bereits Viertelstunden)
+    price_ida_q = price_list_ida[:N]
+
+    # DataFrame mit allen Serien
+    df = pd.DataFrame({
+        "Viertelstunde":             np.arange(1, N+1),
+        "Price_DAA_€/kWh":           price_daa_q,
+        "Price_IDA_€/kWh":           price_ida_q,
+        "SoC_DAA_kWh":               soc_q,
+        "DAA_Charge_pu":             cha_daa_quarters,
+        "DAA_Discharge_pu":          dis_daa_quarters,
+        "DAA_Charge_Real_kWh":       cha_daa_q_real,
+        "DAA_Discharge_Real_kWh":    dis_daa_q_real,
+        "SoC_IDA_kWh":               step2_soc_ida,
+        "IDA_Charge_pu":             cha_ida,
+        "IDA_Discharge_pu":          dis_ida,
+        "IDA_Close_Charge_pu":       step2_cha_ida_close,
+        "IDA_Close_Discharge_pu":    step2_dis_ida_close,
+        "Combined_Charge_pu":        combined_cha,
+        "Combined_Discharge_pu":     combined_dis
+    })
+
+    # 1️⃣ Schreibe alle Daten in ein Sheet "QuarterlyData"
+    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="QuarterlyData", index=False)
+
+    # 2️⃣ Erzeuge für jede Spalte (außer "Viertelstunde") ein Plot‐Bild im Speicher
+    charts: list[tuple[str, io.BytesIO]] = []
+    for col in df.columns:
+        if col == "Viertelstunde":
+            continue
+        fig, ax = plt.subplots(figsize=(6, 3))
+        ax.plot(df["Viertelstunde"], df[col])
+        ax.set_title(col)
+        ax.set_xlabel("Viertelstunde")
+        ax.grid(True)
+        buf = io.BytesIO()
+        fig.tight_layout()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+        buf.seek(0)
+        charts.append((col, buf))
+
+    # 3️⃣ Lade Workbook und erstelle Sheet "Charts"
+    wb       = load_workbook(filepath)
+    ws_chart = wb.create_sheet("Charts")
+
+    # Platziere nacheinander alle Diagramme untereinander
+    row = 1
+    for col_name, img_buf in charts:
+        img = Image(img_buf)
+        img.anchor = f"A{row}"
+        ws_chart.add_image(img)
+        # Schätze, dass 20 Zeilen Höhe pro Chart ausreichen — passe bei Bedarf an
+        row += 20
+
+    wb.save(filepath)
+    print(f"✅ Alle Zeitreihen + Diagramme exportiert nach:\n   {filepath}")
+
+
+export_all_time_series_with_charts(
+    soc_q=               soc_q,
+    cha_daa_quarters=    cha_daa_quarters,
+    dis_daa_quarters=    dis_daa_quarters,
+    cha_daa_q_real=      cha_daa_q_real,
+    dis_daa_q_real=      dis_daa_q_real,
+    step2_soc_ida=       step2_soc_ida,
+    cha_ida=             cha_ida,
+    dis_ida=             dis_ida,
+    step2_cha_ida_close= step2_cha_ida_close,
+    step2_dis_ida_close= step2_dis_ida_close,
+    combined_cha=        combined_cha,
+    combined_dis=        combined_dis,
+    price_list_daa=      price_list_daa,
+    price_list_ida=      price_list_ida,
+    folder_path=         "ergebnisse"
+)
