@@ -1,10 +1,35 @@
 from V9_optimizer import optimizer
 from visualizer import analyze_step1_results, calculate_real_cycles, combine_charge_discharge, export_full_results_to_excel_premium, auswertung_transaktionen_stuendlich
+import argparse
+import configparser
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 from datetime import datetime
+
+
+def _load_excel_paths() -> tuple[str, str]:
+    """Return Excel paths for DAA and IDA from CLI args or config."""
+    parser = argparse.ArgumentParser(description="Run optimizer")
+    parser.add_argument("--excel-path-daa", dest="excel_daa", help="Path to DAA Excel file")
+    parser.add_argument("--excel-path-ida", dest="excel_ida", help="Path to IDA Excel file")
+    parser.add_argument("--config", help="Optional config file with [paths] section")
+    args = parser.parse_args()
+
+    config = configparser.ConfigParser()
+    if args.config and os.path.isfile(args.config):
+        config.read(args.config)
+    elif os.path.isfile("V9_run_optimizer.ini"):
+        config.read("V9_run_optimizer.ini")
+
+    excel_path_daa = args.excel_daa or config.get("paths", "excel_path_daa", fallback=None)
+    excel_path_ida = args.excel_ida or config.get("paths", "excel_path_ida", fallback=None)
+
+    if not excel_path_daa or not excel_path_ida:
+        parser.error("Excel paths must be supplied via CLI or config file")
+
+    return excel_path_daa, excel_path_ida
 
 
 # Batterieparameter definieren
@@ -33,20 +58,8 @@ print("eta_cha =", eta_cha, "# Wirkungsgrad beim Laden")
 print("eta_dis =", eta_dis, "# Wirkungsgrad beim Entladen")
 
 
-
-
-# Pfad zu Solver und Excel-Datei 
-#glpk_path = r"C:\Users\r.rohsius\Downloads\winglpk-4.65\glpk-4.65\w64\glpsol.exe"
-
-#Stündlich:
-#excel_path_daa = r"C:\Users\r.rohsius\OneDrive - Green Planet Energy eG\Desktop\BA\Python\1.Schritt\energy-charts_Stromproduktion_und_Börsenstrompreise_in_Deutschland_2025 (1).xlsx"
-excel_path_daa = r"C:\Users\r.rohsius\OneDrive - Green Planet Energy eG\Desktop\BA\Python\1.Schritt\energy-charts_Stromproduktion_und_Börsenstrompreise_in_Deutschland_2022 (1).xlsx"
-
-
-#Viertelsündlich
-#excel_path_ida = r"C:\Users\r.rohsius\OneDrive - Green Planet Energy eG\Desktop\BA\Python\1.Schritt\energy-charts_Stromproduktion_und_Börsenstrompreise_in_Deutschland_2024.xlsx"
-excel_path_ida = r"C:\Users\r.rohsius\OneDrive - Green Planet Energy eG\Desktop\BA\Python\1.Schritt\energy-charts_Stromproduktion_und_Börsenstrompreise_in_Deutschland_2022.xlsx"
-#excel_path_ida = r"C:\Users\r.rohsius\OneDrive - Green Planet Energy eG\Desktop\BA\Python\1.Schritt\energy-charts_Stromproduktion_und_Börsenstrompreise_in_Deutschland_2023.xlsx"
+# Lade Excel-Dateien über CLI oder Config
+excel_path_daa, excel_path_ida = _load_excel_paths()
 
 
 
