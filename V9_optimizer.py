@@ -24,7 +24,15 @@ import pandas as pd
 
 
 class optimizer:
-    def __init__(self,
+    @staticmethod
+    def _load_price_list(path: str) -> list:
+        """Load a price column from the Excel sheet and return values in EUR/kWh."""
+        df = pd.read_excel(path, sheet_name="1")
+        series = df.iloc[24:, 1]
+        clean = series.astype(str).str.replace(",", ".")
+        return clean.astype(float).div(1000).tolist()
+    def __init__(
+        self,
         n_days: int,
         n_cycles: int,
         c_rate: float,
@@ -34,8 +42,8 @@ class optimizer:
         min_soc: float,
         max_soc: float,
         excel_path_ida,
-        excel_path_daa
-          ):
+        excel_path_daa,
+    ):
             # Batterieparameter
             self.n_days = n_days
             self.n_hours = int(24 * n_days)
@@ -51,38 +59,9 @@ class optimizer:
 
 
             # Preislisten
-            # 2️⃣ Excel laden
-            xls = pd.ExcelFile(excel_path_daa)
-            df = xls.parse("1")
-            price_column = df.iloc[24:, 1]
-
-            # 3️ Preise extrahieren
-            price_list_daa = []
-            for i, val in enumerate(price_column):
-                try:
-                    price = float(str(val).replace(",", "."))
-                    price_list_daa.append(price/1000)
-                except ValueError:
-                    continue
-
-                # 2️⃣ Excel laden
-            xls_q = pd.ExcelFile(excel_path_ida)
-            df_q = xls_q.parse("1")
-            price_column = df_q.iloc[24:, 1]
-
-            # 3️⃣ Preise extrahieren
-            price_list_ida = []
-            for i, val in enumerate(price_column):
-                try:
-                    price = float(str(val).replace(",", "."))
-                    price_list_ida.append(price/1000)
-                except ValueError:
-                    continue
-
-            
-            self.price_list_daa = price_list_daa
-            self.price_list_ida = price_list_ida
-            self.price_list_daa_q = np.repeat(self.price_list_daa,4)
+            self.price_list_daa = self._load_price_list(excel_path_daa)
+            self.price_list_ida = self._load_price_list(excel_path_ida)
+            self.price_list_daa_q = np.repeat(self.price_list_daa, 4)
 
 
 
@@ -108,13 +87,10 @@ class optimizer:
               
 
         # 1. Profit-Trigger: Berechne zukünftigen Maximalpreis und Profit-Fähigkeit
-        best_future_price = [
-            max(self.price_list_daa[t:]) if t < len(self.price_list_daa) else self.price_list_daa[-1]
-            for t in range(len(self.price_list_daa))
-        ]
+        best_future_price = np.maximum.accumulate(self.price_list_daa[::-1])[::-1]
         can_charge = [
-            1 if best_future_price[t] * eta_dis > self.price_list_daa[t] / eta_cha else 0
-            for t in range(len(self.price_list_daa))
+            1 if fut * eta_dis > price / eta_cha else 0
+            for fut, price in zip(best_future_price, self.price_list_daa)
         ]
 
         # Indexmengen
@@ -193,9 +169,9 @@ class optimizer:
         dis = [model.dis_daa[t].value for t in range(1, n_hours + 1)]
 
         profit = sum(
-        power_cap * self.price_list_daa * (dis  - cha)
-        for cha, dis, self.price_list_daa in zip(cha, dis, self.price_list_daa)
-)
+            power_cap * price * (d - c)
+            for c, d, price in zip(cha, dis, self.price_list_daa)
+        )
 
 
         # Auf Viertelstunden skalieren
@@ -209,17 +185,13 @@ class optimizer:
 
 
 
-    def step2_optimize_ida(
-    self,
-    n_hours: int,
-    energy_cap: float,
-    power_cap: float,
-    eta_cha: float,
-    eta_dis: float,
-    step1_cha_daa: list,
-    step1_dis_daa: list
-    ):
+    def step2_optimize_ida(self, step1_cha_daa: list, step1_dis_daa: list):
         model = pyo.ConcreteModel()
+        n_hours = self.n_hours
+        energy_cap = self.energy_cap
+        power_cap = self.power_cap
+        eta_cha = self.eta_cha
+        eta_dis = self.eta_dis
         min_soc = self.min_soc
         max_soc = self.max_soc
         # Anzahl Viertelstunden
@@ -239,13 +211,10 @@ class optimizer:
         
 
              # 1. Profit-Trigger: Berechne zukünftigen Maximalpreis und Profit-Fähigkeit
-        best_future_price = [
-            max(self.price_list_ida[t:]) if t < len(self.price_list_ida) else self.price_list_ida[-1]
-            for t in range(len(self.price_list_ida))
-        ]
+        best_future_price = np.maximum.accumulate(self.price_list_ida[::-1])[::-1]
         can_charge = [
-            1 if best_future_price[t] * eta_dis > self.price_list_ida[t] / eta_cha else 0
-            for t in range(len(self.price_list_ida))
+            1 if fut * eta_dis > price / eta_cha else 0
+            for fut, price in zip(best_future_price, self.price_list_ida)
         ]
 
         # Param für Profit-Trigger
@@ -350,18 +319,16 @@ class optimizer:
 
 
         profit_ida = sum(
-            # DAA-Profit
-            self.price_list_daa_q[q-1] * (
-                eta_dis   * (power_cap/4) * step1_dis_daa[q-1]
-            - (power_cap/4) / eta_cha   * step1_cha_daa[q-1]
+            self.price_list_daa_q[i] * (
+                eta_dis * power_cap / 4 * step1_dis_daa[i]
+                - power_cap / 4 / eta_cha * step1_cha_daa[i]
             )
-            # + IDA-Profit inkl. Close-Deals mit Wirkungsgraden
-            + self.price_list_ida[q-1] * (
-                eta_dis   * (power_cap/4) * (dis_ida[q-1] + dis_ida_close[q-1])
-            - (power_cap/4) / eta_cha   * (cha_ida[q-1] + cha_ida_close[q-1])
+            + self.price_list_ida[i] * (
+                eta_dis * power_cap / 4 * (dis_ida[i] + dis_ida_close[i])
+                - power_cap / 4 / eta_cha * (cha_ida[i] + cha_ida_close[i])
             )
-            for q in range(1, N+1)
-)
+            for i in range(N)
+        )
 
         # Kombinierte Profile (DAA + IDA inkl. Close-Deals)
         cha_combined = np.asarray(step1_cha_daa)   \
