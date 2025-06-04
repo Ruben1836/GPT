@@ -255,11 +255,6 @@ export_full_results_to_excel_premium(
     combined_cha,
     combined_dis
 ) = opt.step2_optimize_ida(
-    n_hours,         # übergibt 4*n_hours Slots intern
-    energy_cap,
-    power_cap,
-    eta_cha,
-    eta_dis,
     cha_daa_quarters,   # aus Schritt 1, Länge 96
     dis_daa_quarters    # aus Schritt 1, Länge 96
 )
